@@ -3,7 +3,7 @@
 #include <stdlib.h>
 enum
 {
-    MATCH = 260,
+    MATCH = 0,
     SPLIT = 259,
     WORD_MARGIN = 258,
     STR_START = 257,
@@ -22,12 +22,11 @@ typedef struct State
     int c;
     struct State *out;
     struct State *out1;
+    struct State *copy;
     int group;
     int visited;
     int visited1;
     struct State *del;
-    Repeat repeat;
-    int count;
 } State;
 
 typedef struct Fragment
@@ -100,13 +99,11 @@ static State *newState(int c, State *out, State *out1, int group)
         state->c = c;
         state->out = out;
         state->out1 = out1;
+        state->copy = NULL;
         state->group = group;
         state->visited = 0;
         state->visited1 = 0;
         state->del = NULL;
-        state->repeat.min = -1;
-        state->repeat.max = -1;
-        state->count = 0;
         return state;
     }
     return NULL;
@@ -181,10 +178,11 @@ static void patch(Fragment *fragment1, Fragment *fragment2)
 
 static void append(Fragment *fragment1, Fragment *fragment2)
 {
+    State *next = (State *)((char *)fragment2->next - ((char *)&fragment2->state->out - (char *)fragment2->state));
     State *state = *fragment1->next;
     if (NULL == state)
     {
-        *fragment1->next = fragment2->state;
+        *fragment1->next = next;
     }
     else
     {
@@ -192,7 +190,7 @@ static void append(Fragment *fragment1, Fragment *fragment2)
         {
             state = state->out;
         }
-        state->out = fragment2->state;
+        state->out = next;
     }
 }
 
@@ -337,16 +335,6 @@ static int charToCharSet(CharSet *out, char c, int inverse, int backslash)
                 out->c[(unsigned char)c] = (char)!inverse;
             }
             break;
-        }
-        case 'B':
-        {
-            CharSet charSet;
-            initCharSet(&charSet, !inverse);
-            charSet.c[WORD_MARGIN] = (char)inverse;
-            for (size_t i = 0; i < STR_END; i++)
-            {
-                out->c[i] |= charSet.c[i];
-            }
         }
         case 'b':
         {
@@ -582,6 +570,69 @@ static int parseRepeat(Repeat *repeat, const char *pattern)
     return i;
 }
 
+static State *copyState(State *state, int visited, int visited1)
+{
+    State *ret = NULL;
+    if (state->visited != visited)
+    {
+        state->visited = visited;
+        ret = newState(state->c, NULL, NULL, state->group);
+        if (NULL == ret)
+        {
+            goto exception;
+        }
+        state->copy = ret;
+        if (state->out != NULL)
+        {
+            if (state->out->visited != visited)
+            {
+                ret->out = copyState(state->out, visited, visited1);
+                if (NULL == ret->out)
+                {
+                    goto exception;
+                }
+            }
+            else
+            {
+                ret->out = state->out->copy;
+            }
+        }
+        if (state->out1 != NULL)
+        {
+            if (state->out1->visited != visited)
+            {
+                ret->out1 = copyState(state->out1, visited, visited1);
+                if (NULL == ret->out1)
+                {
+                    goto exception;
+                }
+            }
+            else
+            {
+                ret->out1 = state->out1->copy;
+            }
+        }
+    }
+    goto finally;
+exception:
+    freeState(ret, visited, visited1);
+    ret = NULL;
+finally:
+    return ret;
+}
+
+static Fragment copyFragment(Fragment *fragment, int visited, int visited1)
+{
+    Fragment ret;
+    ret.state = copyState(fragment->state, visited, visited1);
+    if (ret.state != NULL)
+    {
+        State *next = (State *)((char *)fragment->next - ((char *)&fragment->state->out - (char *)fragment->state));
+        ret.next = &next->copy->out;
+    }
+    return ret;
+}
+
 static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgroup, int visited, int visited1)
 {
     *out = initFragment(NULL, NULL);
@@ -674,18 +725,81 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                 if (stack.n > 0 + or)
                 {
                     fragment = popFragmentStack(&stack);
-                    State *state = newState(SPLIT, fragment.state, NULL, group);
-                    if (state != NULL)
+                    for (size_t i = 0; i < repeat.min; i++)
                     {
-                        state->repeat = repeat;
-                        Fragment fragment1 = initFragment(state, &state->out1);
-                        patch(&fragment, &fragment1);
+                        if (stack.n > 1 + or)
+                        {
+                            Fragment fragment2 = popFragmentStack(&stack);
+                            Fragment fragment1 = popFragmentStack(&stack);
+                            Fragment fragment3 = linkFragment(&fragment1, &fragment2);
+                            pushFragmentStack(&stack, &fragment3);
+                        }
+                        Fragment fragment1 = copyFragment(&fragment, visited++, visited1++);
+                        if (NULL == fragment1.state)
+                        {
+                            goto exception;
+                        }
                         pushFragmentStack(&stack, &fragment1);
                     }
-                    else
+                    if (0 == repeat.max)
                     {
-                        goto exception;
+                        if (stack.n > 1 + or)
+                        {
+                            Fragment fragment2 = popFragmentStack(&stack);
+                            Fragment fragment1 = popFragmentStack(&stack);
+                            Fragment fragment3 = linkFragment(&fragment1, &fragment2);
+                            pushFragmentStack(&stack, &fragment3);
+                        }
+                        Fragment fragment1 = copyFragment(&fragment, visited++, visited1++);
+                        if (NULL == fragment1.state)
+                        {
+                            goto exception;
+                        }
+                        State *state = newState(SPLIT, NULL, fragment1.state, group);
+                        if (state != NULL)
+                        {
+                            Fragment fragment2 = initFragment(state, &state->out);
+                            patch(&fragment1, &fragment2);
+                            pushFragmentStack(&stack, &fragment2);
+                        }
+                        else
+                        {
+                            freeFragment(&fragment1, visited++, visited1++);
+                            goto exception;
+                        }
                     }
+                    else if (repeat.max > 0)
+                    {
+                        for (size_t i = 0; i < repeat.max - repeat.min; i++)
+                        {
+                            if (stack.n > 1 + or)
+                            {
+                                Fragment fragment2 = popFragmentStack(&stack);
+                                Fragment fragment1 = popFragmentStack(&stack);
+                                Fragment fragment3 = linkFragment(&fragment1, &fragment2);
+                                pushFragmentStack(&stack, &fragment3);
+                            }
+                            Fragment fragment1 = copyFragment(&fragment, visited++, visited1++);
+                            if (NULL == fragment1.state)
+                            {
+                                goto exception;
+                            }
+                            State *state = newState(SPLIT, NULL, fragment1.state, group);
+                            if (state != NULL)
+                            {
+                                Fragment fragment2 = initFragment(state, &state->out);
+                                append(&fragment1, &fragment2);
+                                fragment2 = initFragment(state, fragment1.next);
+                                pushFragmentStack(&stack, &fragment2);
+                            }
+                            else
+                            {
+                                freeFragment(&fragment1, visited++, visited1++);
+                                goto exception;
+                            }
+                        }
+                    }
+                    freeFragment(&fragment, visited++, visited1++);
                 }
                 else
                 {
@@ -709,10 +823,10 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
             if (stack.n > 0 + or)
             {
                 fragment = popFragmentStack(&stack);
-                State *state = newState(SPLIT, fragment.state, NULL, group);
+                State *state = newState(SPLIT, NULL, fragment.state, group);
                 if (state != NULL)
                 {
-                    Fragment fragment1 = initFragment(state, &state->out1);
+                    Fragment fragment1 = initFragment(state, &state->out);
                     patch(&fragment, &fragment1);
                     pushFragmentStack(&stack, &fragment1);
                 }
@@ -732,12 +846,12 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
             if (stack.n > 0 + or)
             {
                 fragment = popFragmentStack(&stack);
-                State *state = newState(SPLIT, fragment.state, NULL, group);
+                State *state = newState(SPLIT, NULL, fragment.state, group);
                 if (state != NULL)
                 {
-                    Fragment fragment1 = initFragment(state, &state->out1);
+                    Fragment fragment1 = initFragment(state, &state->out);
                     patch(&fragment, &fragment1);
-                    fragment1 = initFragment(fragment.state, &state->out1);
+                    fragment1 = initFragment(fragment.state, &state->out);
                     pushFragmentStack(&stack, &fragment1);
                 }
                 else
@@ -756,11 +870,12 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
             if (stack.n > 0 + or)
             {
                 fragment = popFragmentStack(&stack);
-                State *state = newState(SPLIT, fragment.state, NULL, group);
+                State *state = newState(SPLIT, NULL, fragment.state, group);
                 if (state != NULL)
                 {
-                    Fragment fragment1 = initFragment(state, &state->out1);
-                    append(&fragment1, &fragment);
+                    Fragment fragment1 = initFragment(state, &state->out);
+                    append(&fragment, &fragment1);
+                    fragment1 = initFragment(state, fragment.next);
                     pushFragmentStack(&stack, &fragment1);
                 }
                 else
@@ -803,6 +918,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                     }
                     else
                     {
+                        freeFragment(&fragment3, visited, visited1);
                         goto exception;
                     }
                 }
@@ -982,74 +1098,25 @@ finally:
     return i;
 }
 
-static void traverseStates(StateSet *stateSet, State *state, int visited, int visited1)
+static void traverseStates(StateSet *stateSet, State *state, int visited)
 {
-    if (state->c != SPLIT)
+    if (state->visited != visited)
     {
-        if (state->visited != visited)
+        state->visited = visited;
+        if (state->c != SPLIT)
         {
-            state->visited = visited;
             stateSet->states[stateSet->count++] = state;
         }
-    }
-    else
-    {
-        switch (state->repeat.min)
+        else
         {
-        case -1:
             if (state->out != NULL)
             {
-                traverseStates(stateSet, state->out, visited, visited1);
+                traverseStates(stateSet, state->out, visited);
             }
             if (state->out1 != NULL)
             {
-                traverseStates(stateSet, state->out1, visited, visited1);
+                traverseStates(stateSet, state->out1, visited);
             }
-            break;
-        default:
-            if (state->visited1 != visited1)
-            {
-                state->visited1 = visited1;
-                state->count = 0;
-            }
-            if (state->count < state->repeat.min)
-            {
-                if (state->out != NULL)
-                {
-                    traverseStates(stateSet, state->out, visited, visited1);
-                }
-            }
-            else if (0 == state->repeat.max)
-            {
-                if (state->out != NULL)
-                {
-                    traverseStates(stateSet, state->out, visited, visited1);
-                }
-                if (state->out1 != NULL)
-                {
-                    traverseStates(stateSet, state->out1, visited, visited1);
-                }
-            }
-            else if (state->count < state->repeat.max)
-            {
-                if (state->out != NULL)
-                {
-                    traverseStates(stateSet, state->out, visited, visited1);
-                }
-                if (state->out1 != NULL)
-                {
-                    traverseStates(stateSet, state->out1, visited, visited1);
-                }
-            }
-            else
-            {
-                if (state->out1 != NULL)
-                {
-                    traverseStates(stateSet, state->out1, visited, visited1);
-                }
-            }
-            state->count++;
-            break;
         }
     }
 }
@@ -1072,17 +1139,13 @@ static void freeStateSet(StateSet *stateSet)
     }
 }
 
-static void nextStates(StateSet *out, StateSet *states, int visited, int visited1)
+static void nextStates(StateSet *out, StateSet *states, int visited)
 {
     for (size_t i = 0; i < states->count; i++)
     {
         if (states->states[i]->out != NULL)
         {
-            traverseStates(out, states->states[i]->out, visited, visited1);
-        }
-        if (states->states[i]->out1 != NULL)
-        {
-            traverseStates(out, states->states[i]->out1, visited, visited1);
+            traverseStates(out, states->states[i]->out, visited);
         }
     }
     
@@ -1185,10 +1248,11 @@ static void freeAllStateSet(StateSet *stateSet)
     }
 }
 
-static int checkPreState(const State *pre, const State *next)
+static int checkPreState(State *pre, const State *next, int visited)
 {
-    if (pre != NULL)
+    if (pre != NULL && pre->visited != visited)
     {
+        pre->visited = visited;
         switch (pre->c)
         {
         case MATCH:
@@ -1200,7 +1264,7 @@ static int checkPreState(const State *pre, const State *next)
             case WORD_MARGIN:
             case STR_START:
             case STR_END:
-                if (checkPreState(pre->out, next) == 0)
+                if (checkPreState(pre->out, next, visited) == 0)
                 {
                     return 0;
                 }
@@ -1218,7 +1282,7 @@ static int checkPreState(const State *pre, const State *next)
             case WORD_MARGIN:
             case STR_START:
             case STR_END:
-                if (checkPreState(pre->out1, next) == 0)
+                if (checkPreState(pre->out1, next, visited) == 0)
                 {
                     return 0;
                 }
@@ -1241,7 +1305,7 @@ static int checkPreState(const State *pre, const State *next)
             case WORD_MARGIN:
             case STR_START:
             case STR_END:
-                if (checkPreState(pre->out, next) == 0)
+                if (checkPreState(pre->out, next, visited) == 0)
                 {
                     return 0;
                 }
@@ -1259,12 +1323,12 @@ static int checkPreState(const State *pre, const State *next)
     return -1;
 }
 
-static State *findPreState(const StateSet *stateSet, const State *state)
+static State *findPreState(const StateSet *stateSet, const State *state, int visited)
 {
     State *ret = NULL;
     for (size_t i = 0; i < stateSet->count; i++)
     {
-        if (checkPreState(stateSet->states[i], state) == 0)
+        if (checkPreState(stateSet->states[i], state, visited) == 0)
         {
             ret = stateSet->states[i];
             break;
@@ -1289,8 +1353,7 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
     }
     regex->next.count = 0;
     regex->visited++;
-    regex->visited1++;
-    traverseStates(&regex->next, regex->root, regex->visited, regex->visited1);
+    traverseStates(&regex->next, regex->root, regex->visited);
     for (size_t i = 0;; i++)
     {
         State *match = NULL;
@@ -1306,22 +1369,19 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
             case WORD_MARGIN:
                 if (isWordMargin(text, i) > 0)
                 {
-                    regex->visited++;
-                    traverseStates(&regex->next, regex->next.states[j]->out, regex->visited, regex->visited1);
+                    traverseStates(&regex->next, regex->next.states[j]->out, regex->visited);
                 }
                 break;
             case STR_START:
                 if (isStrStart(text, i) > 0)
                 {
-                    regex->visited++;
-                    traverseStates(&regex->next, regex->next.states[j]->out, regex->visited, regex->visited1);
+                    traverseStates(&regex->next, regex->next.states[j]->out, regex->visited);
                 }
                 break;
             case STR_END:
                 if (isStrEnd(text, i) > 0)
                 {
-                    regex->visited++;
-                    traverseStates(&regex->next, regex->next.states[j]->out, regex->visited, regex->visited1);
+                    traverseStates(&regex->next, regex->next.states[j]->out, regex->visited);
                 }
                 break;
             default:
@@ -1336,7 +1396,7 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
         {
             regex->next.count = 0;
             regex->visited++;
-            nextStates(&regex->next, &regex->cmp, regex->visited, regex->visited1);
+            nextStates(&regex->next, &regex->cmp, regex->visited);
             if ((flag & CREGEX_FLAG_NOSUB) != CREGEX_FLAG_NOSUB && regex->group > 1)
             {
                 StateSet *stateSet = copyNewStateSet(&regex->cmp);
@@ -1361,17 +1421,19 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
             if (nMatch > 0)
             {
                 matchs[0].begin = regex->index;
-                matchs[0].len = regex->index + i;
+                matchs[0].len = i;
             }
-            for (; root != NULL; i--)
+            StateSet *cur = root;
+            for (; cur != NULL; i--)
             {
-                match = findPreState(root, match);
+                regex->visited++;
+                match = findPreState(cur, match, regex->visited);
                 if (match->group > 0 && match->group < nMatch)
                 {
-                    matchs[match->group].begin = i - 1;
+                    matchs[match->group].begin = regex->index + i - 1;
                     matchs[match->group].len++;
                 }
-                root = root->next;
+                cur = cur->next;
             }
             goto finally;
         }
@@ -1422,13 +1484,11 @@ CRegex *cRegexCompile(const char *pattern)
     regex->matchState.c = MATCH;
     regex->matchState.out = NULL;
     regex->matchState.out1 = NULL;
+    regex->matchState.copy = NULL;
     regex->matchState.group = 0;
     regex->matchState.visited = 0;
     regex->matchState.visited1 = 0;
     regex->matchState.del = NULL;
-    regex->matchState.repeat.min = -1;
-    regex->matchState.repeat.max = -1;
-    regex->matchState.count = 0;
     Fragment match = initFragment(&regex->matchState, NULL);
     if (fragment.state != NULL)
     {
