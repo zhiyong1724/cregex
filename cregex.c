@@ -240,6 +240,7 @@ static int charToCharSet(CharSet *out, char c, int inverse, int backslash)
         case '.':
         case '^':
         case '$':
+        case '-':
         {
             out->c[(unsigned char)c] = (char)!inverse;
             break;
