@@ -637,7 +637,6 @@ static Fragment copyFragment(Fragment *fragment, int visited, int visited1)
 static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgroup, int visited, int visited1)
 {
     *out = initFragment(NULL, NULL);
-    Fragment fragment = initFragment(NULL, NULL);
     int square = 0;
     int brace = 0;
     FragmentStack stack;
@@ -725,7 +724,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                 }
                 if (stack.n > 0 + or)
                 {
-                    fragment = popFragmentStack(&stack);
+                    Fragment fragment = popFragmentStack(&stack);
                     for (size_t i = 0; i < repeat.min; i++)
                     {
                         if (stack.n > 1 + or)
@@ -738,6 +737,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                         Fragment fragment1 = copyFragment(&fragment, visited++, visited1++);
                         if (NULL == fragment1.state)
                         {
+                            freeFragment(&fragment, visited++, visited1++);
                             goto exception;
                         }
                         pushFragmentStack(&stack, &fragment1);
@@ -754,6 +754,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                         Fragment fragment1 = copyFragment(&fragment, visited++, visited1++);
                         if (NULL == fragment1.state)
                         {
+                            freeFragment(&fragment, visited++, visited1++);
                             goto exception;
                         }
                         State *state = newState(SPLIT, NULL, fragment1.state, group);
@@ -766,6 +767,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                         else
                         {
                             freeFragment(&fragment1, visited++, visited1++);
+                            freeFragment(&fragment, visited++, visited1++);
                             goto exception;
                         }
                     }
@@ -783,6 +785,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                             Fragment fragment1 = copyFragment(&fragment, visited++, visited1++);
                             if (NULL == fragment1.state)
                             {
+                                freeFragment(&fragment, visited++, visited1++);
                                 goto exception;
                             }
                             State *state = newState(SPLIT, NULL, fragment1.state, group);
@@ -796,6 +799,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                             else
                             {
                                 freeFragment(&fragment1, visited++, visited1++);
+                                freeFragment(&fragment, visited++, visited1++);
                                 goto exception;
                             }
                         }
@@ -823,7 +827,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         {
             if (stack.n > 0 + or)
             {
-                fragment = popFragmentStack(&stack);
+                Fragment fragment = popFragmentStack(&stack);
                 State *state = newState(SPLIT, NULL, fragment.state, group);
                 if (state != NULL)
                 {
@@ -833,6 +837,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                 }
                 else
                 {
+                    freeFragment(&fragment, visited, visited1);
                     goto exception;
                 }
             }
@@ -846,7 +851,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         {
             if (stack.n > 0 + or)
             {
-                fragment = popFragmentStack(&stack);
+                Fragment fragment = popFragmentStack(&stack);
                 State *state = newState(SPLIT, NULL, fragment.state, group);
                 if (state != NULL)
                 {
@@ -857,6 +862,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                 }
                 else
                 {
+                    freeFragment(&fragment, visited, visited1);
                     goto exception;
                 }
             }
@@ -870,7 +876,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         {
             if (stack.n > 0 + or)
             {
-                fragment = popFragmentStack(&stack);
+                Fragment fragment = popFragmentStack(&stack);
                 State *state = newState(SPLIT, NULL, fragment.state, group);
                 if (state != NULL)
                 {
@@ -881,6 +887,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                 }
                 else
                 {
+                    freeFragment(&fragment, visited, visited1);
                     goto exception;
                 }
             }
@@ -911,7 +918,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                     {
                         goto exception;
                     }
-                    fragment  = popFragmentStack(&stack);
+                    Fragment fragment  = popFragmentStack(&stack);
                     Fragment fragment1 = combineFragment(&fragment, &fragment3);
                     if (fragment1.state != NULL)
                     {
@@ -920,6 +927,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                     else
                     {
                         freeFragment(&fragment3, visited, visited1);
+                        freeFragment(&fragment, visited, visited1);
                         goto exception;
                     }
                 }
@@ -1070,10 +1078,11 @@ out:
     {
         if (stack.n > 0)
         {
-            fragment = popFragmentStack(&stack);
+            Fragment fragment = popFragmentStack(&stack);
             *out = combineFragment(&fragment, &fragment3);
             if (NULL == out->state)
             {
+                freeFragment(&fragment, visited, visited1);
                 goto exception;
             }
         }
@@ -1094,7 +1103,6 @@ exception:
         Fragment fragment = popFragmentStack(&stack);
         freeFragment(&fragment, visited, visited1);
     }
-    freeFragment(&fragment, visited, visited1);
 finally:
     return i;
 }
