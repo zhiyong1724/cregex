@@ -17,13 +17,14 @@ typedef struct Repeat
     int max;
 } Repeat;
 
+#define MAX_GROUPS 8
 typedef struct State
 {
     int c;
     struct State *out;
     struct State *out1;
     struct State *copy;
-    int group;
+    int groups[MAX_GROUPS];
     int visited;
     int visited1;
     struct State *del;
@@ -59,7 +60,7 @@ struct CRegex
     State *root;
     StateSet next;
     StateSet cmp;
-    int group;
+    int groups[MAX_GROUPS];
     int index;
     int visited;
     int visited1;
@@ -91,7 +92,7 @@ static Fragment popFragmentStack(FragmentStack *stack)
     return stack->stack[--stack->n];
 }
 
-static State *newState(int c, State *out, State *out1, int group)
+static State *newState(int c, State *out, State *out1, int *groups, int deep)
 {
     State *state = (State *)malloc(sizeof(State));
     if (state != NULL)
@@ -100,7 +101,14 @@ static State *newState(int c, State *out, State *out1, int group)
         state->out = out;
         state->out1 = out1;
         state->copy = NULL;
-        state->group = group;
+        for (size_t i = 0; i < MAX_GROUPS; i++)
+        {
+            state->groups[i] = -1;
+        }
+        for (; deep >= 0 && deep < MAX_GROUPS; deep--)
+        {
+            state->groups[deep] = groups[deep] - 1;
+        }
         state->visited = 0;
         state->visited1 = 0;
         state->del = NULL;
@@ -203,7 +211,7 @@ static Fragment combineFragment(Fragment *fragment1, Fragment *fragment2)
     }
     else
     {
-        State *split = newState(SPLIT, fragment1->state, fragment2->state, 0);
+        State *split = newState(SPLIT, fragment1->state, fragment2->state, NULL, -1);
         if (split != NULL)
         {
             append(fragment1, fragment2);
@@ -378,7 +386,7 @@ static int charToCharSet(CharSet *out, char c, int inverse, int backslash)
     return 0;
 }
 
-static Fragment combineCharByCharSet(const CharSet *charSet, int group, int visited, int visited1)
+static Fragment combineCharByCharSet(const CharSet *charSet, int *groups, int deep, int visited, int visited1)
 {
     Fragment ret = initFragment(NULL, NULL);
     State *state = NULL;
@@ -386,7 +394,7 @@ static Fragment combineCharByCharSet(const CharSet *charSet, int group, int visi
     {
         if (charSet->c[i] > 0)
         {
-            state = newState(i, NULL, NULL, group);
+            state = newState(i, NULL, NULL, groups, deep);
             if (state != NULL)
             {
                 Fragment fragment = initFragment(state, &state->out);
@@ -410,19 +418,19 @@ finally:
     return ret;
 }
 
-static Fragment parseBackslash(char c, int group, int visited, int visited1)
+static Fragment parseBackslash(char c, int *groups, int deep, int visited, int visited1)
 {
     Fragment ret = initFragment(NULL, NULL);
     CharSet charSet;
     initCharSet(&charSet, 0);
     if (charToCharSet(&charSet, c, 0, 1) == 0)
     {
-        ret = combineCharByCharSet(&charSet, group, visited, visited1);
+        ret = combineCharByCharSet(&charSet, groups, deep, visited, visited1);
     }
     return ret;
 }
 
-static int parseSquare(Fragment *out, const char *pattern, int group, int visited, int visited1)
+static int parseSquare(Fragment *out, const char *pattern, int *groups, int deep, int visited, int visited1)
 {
     *out = initFragment(NULL, NULL);
     CharSet charSet;
@@ -466,7 +474,7 @@ static int parseSquare(Fragment *out, const char *pattern, int group, int visite
                 break;
             }
         }
-        *out = combineCharByCharSet(&charSet, group, visited, visited1);
+        *out = combineCharByCharSet(&charSet, groups, deep, visited, visited1);
         if (NULL == out->state)
         {
             goto exception;
@@ -510,7 +518,7 @@ static int parseSquare(Fragment *out, const char *pattern, int group, int visite
                 break;
             }
         }
-        *out = combineCharByCharSet(&charSet, group, visited, visited1);
+        *out = combineCharByCharSet(&charSet, groups, deep, visited, visited1);
         if (NULL == out->state)
         {
             goto exception;
@@ -577,12 +585,16 @@ static State *copyState(State *state, int visited, int visited1)
     if (state->visited != visited)
     {
         state->visited = visited;
-        ret = newState(state->c, NULL, NULL, state->group);
+        ret = newState(state->c, NULL, NULL, NULL, -1);
         if (NULL == ret)
         {
             goto exception;
         }
         state->copy = ret;
+        for (size_t i = 0; i < MAX_GROUPS; i++)
+        {
+            ret->groups[i] = state->groups[i];
+        }
         if (state->out != NULL)
         {
             if (state->out->visited != visited)
@@ -634,7 +646,7 @@ static Fragment copyFragment(Fragment *fragment, int visited, int visited1)
     return ret;
 }
 
-static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgroup, int visited, int visited1)
+static int parsePattern(Fragment *out, const char *pattern, int *paren, int *groups, int visited, int visited1)
 {
     *out = initFragment(NULL, NULL);
     int square = 0;
@@ -643,11 +655,10 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
     initFragmentStack(&stack);
     int i = 0;
     int or = 0;
-    if (1 == *paren)
+    if (*paren >= 0)
     {
-        (*pgroup)++;
+        groups[*paren]++;
     }
-    int group = *pgroup - 1;
     for (; pattern[i] != '\0'; i++)
     {
         switch (pattern[i])
@@ -656,7 +667,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         {
             (*paren)++;
             Fragment fragment1;
-            int result = parsePattern(&fragment1, &pattern[i + 1], paren, pgroup, visited, visited1);
+            int result = parsePattern(&fragment1, &pattern[i + 1], paren, groups, visited, visited1);
             if (result >= 0)
             {
                 if (stack.n > 1 + or)
@@ -687,7 +698,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         {
             square++;
             Fragment fragment1;
-            int result = parseSquare(&fragment1, &pattern[i + 1], group, visited, visited1);
+            int result = parseSquare(&fragment1, &pattern[i + 1], groups, *paren, visited, visited1);
             if (result >= 0)
             {
                 if (stack.n > 1 + or)
@@ -757,7 +768,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                             freeFragment(&fragment, visited++, visited1++);
                             goto exception;
                         }
-                        State *state = newState(SPLIT, NULL, fragment1.state, group);
+                        State *state = newState(SPLIT, NULL, fragment1.state, NULL, -1);
                         if (state != NULL)
                         {
                             Fragment fragment2 = initFragment(state, &state->out);
@@ -788,7 +799,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
                                 freeFragment(&fragment, visited++, visited1++);
                                 goto exception;
                             }
-                            State *state = newState(SPLIT, NULL, fragment1.state, group);
+                            State *state = newState(SPLIT, NULL, fragment1.state, NULL, -1);
                             if (state != NULL)
                             {
                                 Fragment fragment2 = initFragment(state, &state->out);
@@ -828,7 +839,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
             if (stack.n > 0 + or)
             {
                 Fragment fragment = popFragmentStack(&stack);
-                State *state = newState(SPLIT, NULL, fragment.state, group);
+                State *state = newState(SPLIT, NULL, fragment.state, NULL, -1);
                 if (state != NULL)
                 {
                     Fragment fragment1 = initFragment(state, &state->out);
@@ -852,7 +863,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
             if (stack.n > 0 + or)
             {
                 Fragment fragment = popFragmentStack(&stack);
-                State *state = newState(SPLIT, NULL, fragment.state, group);
+                State *state = newState(SPLIT, NULL, fragment.state, NULL, -1);
                 if (state != NULL)
                 {
                     Fragment fragment1 = initFragment(state, &state->out);
@@ -877,7 +888,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
             if (stack.n > 0 + or)
             {
                 Fragment fragment = popFragmentStack(&stack);
-                State *state = newState(SPLIT, NULL, fragment.state, group);
+                State *state = newState(SPLIT, NULL, fragment.state, NULL, -1);
                 if (state != NULL)
                 {
                     Fragment fragment1 = initFragment(state, &state->out);
@@ -951,7 +962,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         }
         case '\\':
         {
-            Fragment fragment1 = parseBackslash(pattern[i + 1], group, visited, visited1);
+            Fragment fragment1 = parseBackslash(pattern[i + 1], groups, *paren, visited, visited1);
             if (fragment1.state != NULL)
             {
                 if (stack.n > 1 + or)
@@ -975,7 +986,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
             CharSet charSet;
             initCharSet(&charSet, 1);
             charToCharSet(&charSet, '\n', 1, 0);
-            Fragment fragment1 = combineCharByCharSet(&charSet, group, visited, visited1);
+            Fragment fragment1 = combineCharByCharSet(&charSet, groups, *paren, visited, visited1);
             if (fragment1.state != NULL)
             {
                 if (stack.n > 1 + or)
@@ -995,7 +1006,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         }
         case '^':
         {
-            State *state = newState(STR_START, NULL, NULL, group);
+            State *state = newState(STR_START, NULL, NULL, NULL, -1);
             if (state != NULL)
             {
                 if (stack.n > 1 + or)
@@ -1016,7 +1027,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         }
         case '$':
         {
-            State *state = newState(STR_END, NULL, NULL, group);
+            State *state = newState(STR_END, NULL, NULL, NULL, -1);
             if (state != NULL)
             {
                 if (stack.n > 1 + or)
@@ -1037,7 +1048,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *pgr
         }
         default:
         {
-            State *state = newState((unsigned char)pattern[i], NULL, NULL, group);
+            State *state = newState((unsigned char)pattern[i], NULL, NULL, groups, *paren);
             if (state != NULL)
             {
                 if (stack.n > 1 + or)
@@ -1406,7 +1417,7 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
             regex->next.count = 0;
             regex->visited++;
             nextStates(&regex->next, &regex->cmp, regex->visited);
-            if ((flag & CREGEX_FLAG_NOSUB) != CREGEX_FLAG_NOSUB && regex->group > 1)
+            if ((flag & CREGEX_FLAG_NOSUB) != CREGEX_FLAG_NOSUB && nMatch > 1)
             {
                 StateSet *stateSet = copyNewStateSet(&regex->cmp);
                 if (NULL == stateSet)
@@ -1437,10 +1448,23 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
             {
                 regex->visited++;
                 match = findPreState(cur, match, regex->visited);
-                if (match->group > 0 && match->group < nMatch)
+                for (int j = 0; j < MAX_GROUPS; j++)
                 {
-                    matchs[match->group].begin = regex->index + i - 1;
-                    matchs[match->group].len++;
+                    if (match->groups[j] >= 0)
+                    {
+                        int index = 0;
+                        for (int k = j - 1; k >= 0; k--)
+                        {
+                            index += regex->groups[k];
+                        }
+                        index += match->groups[j];
+                        if (index + 1 < nMatch)
+                        {
+                            matchs[index + 1].begin = regex->index + i - 1;
+                            matchs[index + 1].len++;
+                        }
+                        
+                    }
                 }
                 cur = cur->next;
             }
@@ -1481,12 +1505,15 @@ CRegex *cRegexCompile(const char *pattern)
         goto exception;
     }
     Fragment fragment = initFragment(NULL, NULL);
-    int paren = 0;
-    regex->group = 1;
+    int paren = -1;
+    for (size_t i = 0; i < MAX_GROUPS; i++)
+    {
+        regex->groups[i] = 0;
+    }
     regex->visited = 1;
     regex->visited1 = 1;
-    int result = parsePattern(&fragment, pattern, &paren, &regex->group, regex->visited, regex->visited1);
-    if (result < 0 || paren != 0)
+    int result = parsePattern(&fragment, pattern, &paren, regex->groups, regex->visited, regex->visited1);
+    if (result < 0 || paren != -1)
     {
         goto exception;
     }
@@ -1494,7 +1521,6 @@ CRegex *cRegexCompile(const char *pattern)
     regex->matchState.out = NULL;
     regex->matchState.out1 = NULL;
     regex->matchState.copy = NULL;
-    regex->matchState.group = 0;
     regex->matchState.visited = 0;
     regex->matchState.visited1 = 0;
     regex->matchState.del = NULL;
