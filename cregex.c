@@ -655,7 +655,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *gro
     initFragmentStack(&stack);
     int i = 0;
     int or = 0;
-    if (*paren >= 0)
+    if (*paren >= 0 && *paren < MAX_GROUPS)
     {
         groups[*paren]++;
     }
