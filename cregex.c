@@ -1374,9 +1374,11 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
     regex->next.count = 0;
     regex->visited++;
     traverseStates(&regex->next, regex->root, regex->visited);
-    for (size_t i = 0;; i++)
+    State *match = NULL;
+    size_t len = 0;
+    size_t i = 0;
+    for (;; i++)
     {
-        State *match = NULL;
         regex->cmp.count = 0;
         for (size_t j = 0; j < regex->next.count; j++)
         {
@@ -1385,6 +1387,7 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
             {
             case MATCH:
                 match = regex->next.states[j];
+                len = i;
                 break;
             case WORD_MARGIN:
                 if (isWordMargin(text, i) > 0)
@@ -1437,14 +1440,18 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
         }
         else if (match != NULL)
         {
-            ret = (int)i;
+            ret = (int)len;
             if (nMatch > 0)
             {
                 matchs[0].begin = regex->index;
-                matchs[0].len = i;
+                matchs[0].len = len;
             }
             StateSet *cur = root;
-            for (; cur != NULL; i--)
+            for (; i > len && cur != NULL; i--)
+            {
+                cur = cur->next;
+            }
+            for (size_t i = len; cur != NULL; i--)
             {
                 regex->visited++;
                 match = findPreState(cur, match, regex->visited);
@@ -1463,7 +1470,6 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
                             matchs[index + 1].begin = regex->index + i - 1;
                             matchs[index + 1].len++;
                         }
-                        
                     }
                 }
                 cur = cur->next;
