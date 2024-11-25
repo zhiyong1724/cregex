@@ -1363,7 +1363,7 @@ static void initRegexMatch(CRegexMatch *match)
     match->len = 0;
 }
 
-static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nMatch, int flag)
+static int match(CRegex *regex, const char *text, size_t index, CRegexMatch *matchs, size_t nMatch, int flag)
 {   
     int ret = -1;
     StateSet *root = NULL;
@@ -1390,25 +1390,25 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
                 len = i;
                 break;
             case WORD_MARGIN:
-                if (isWordMargin(text, i) > 0)
+                if (isWordMargin(text, index + i) > 0)
                 {
                     traverseStates(&regex->next, regex->next.states[j]->out, regex->visited);
                 }
                 break;
             case STR_START:
-                if (isStrStart(text, i) > 0)
+                if (isStrStart(text, index + i) > 0)
                 {
                     traverseStates(&regex->next, regex->next.states[j]->out, regex->visited);
                 }
                 break;
             case STR_END:
-                if (isStrEnd(text, i) > 0)
+                if (isStrEnd(text, index + i) > 0)
                 {
                     traverseStates(&regex->next, regex->next.states[j]->out, regex->visited);
                 }
                 break;
             default:
-                if (c == (unsigned char)text[i])
+                if (c == (unsigned char)text[index + i])
                 {
                     regex->cmp.states[regex->cmp.count++] = regex->next.states[j];
                 }
@@ -1480,7 +1480,7 @@ static int match(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
         {
             goto exception;
         }
-        if ('\0' == text[i])
+        if ('\0' == text[index + i])
         {
             break;
         }
@@ -1572,7 +1572,7 @@ void cRegexFree(CRegex *regex)
 
 int cRegexMatch(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nMatch, int flag)
 {
-    int len = match(regex, text, matchs, nMatch, flag);
+    int len = match(regex, text, 0, matchs, nMatch, flag);
     if (len >= 0 && '\0' == text[len])
     {
         return 0;
@@ -1584,7 +1584,7 @@ int cRegexSearch(CRegex *regex, const char *text, CRegexMatch *matchs, size_t nM
 {
     while (text[regex->index] != '\0')
     {
-        int len = match(regex, &text[regex->index], matchs, nMatch, flag);
+        int len = match(regex, text, regex->index, matchs, nMatch, flag);
         if (len > 0)
         {
             regex->index += len;
