@@ -1443,7 +1443,7 @@ static int match(CRegex *regex, const char *text, size_t index, CRegexMatch *mat
             ret = (int)len;
             if (nMatch > 0)
             {
-                matchs[0].begin = regex->index;
+                matchs[0].begin = index;
                 matchs[0].len = len;
             }
             StateSet *cur = root;
@@ -1459,16 +1459,16 @@ static int match(CRegex *regex, const char *text, size_t index, CRegexMatch *mat
                 {
                     if (match->groups[j] >= 0)
                     {
-                        int index = 0;
+                        int l = 0;
                         for (int k = j - 1; k >= 0; k--)
                         {
-                            index += regex->groups[k];
+                            l += regex->groups[k];
                         }
-                        index += match->groups[j];
-                        if (index + 1 < nMatch)
+                        l += match->groups[j];
+                        if (l + 1 < nMatch)
                         {
-                            matchs[index + 1].begin = regex->index + i - 1;
-                            matchs[index + 1].len++;
+                            matchs[l + 1].begin = index + i - 1;
+                            matchs[l + 1].len++;
                         }
                     }
                 }
