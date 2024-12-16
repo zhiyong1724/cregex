@@ -228,7 +228,7 @@ static Fragment linkFragment(Fragment *fragment1, Fragment *fragment2)
     return ret;
 }
 
-static int charToCharSet(CharSet *out, char c, int inverse, int backslash)
+static int charToCharSet(CharSet *out, char c, int inverse, int backslash, int forSquare)
 {
     if (backslash > 0)
     {
@@ -248,9 +248,20 @@ static int charToCharSet(CharSet *out, char c, int inverse, int backslash)
         case '.':
         case '^':
         case '$':
-        case '-':
         {
             out->c[(unsigned char)c] = (char)!inverse;
+            break;
+        }
+        case '-':
+        {
+            if (forSquare > 0)
+            {
+                out->c[(unsigned char)c] = (char)!inverse;
+            }
+            else
+            {
+                return -1;
+            }
             break;
         }
         case 'W':
@@ -375,7 +386,15 @@ static int charToCharSet(CharSet *out, char c, int inverse, int backslash)
         case '^':
         case '$':
         {
-            return -1;
+            if (forSquare > 0)
+            {
+                out->c[(unsigned char)c] = (char)!inverse;
+            }
+            else
+            {
+                return -1;
+            }
+            break;
         }
         default:
         {
@@ -423,7 +442,7 @@ static Fragment parseBackslash(char c, int *groups, int deep, int visited, int v
     Fragment ret = initFragment(NULL, NULL);
     CharSet charSet;
     initCharSet(&charSet, 0);
-    if (charToCharSet(&charSet, c, 0, 1) == 0)
+    if (charToCharSet(&charSet, c, 0, 1, 0) == 0)
     {
         ret = combineCharByCharSet(&charSet, groups, deep, visited, visited1);
     }
@@ -445,7 +464,7 @@ static int parseSquare(Fragment *out, const char *pattern, int *groups, int deep
             {
             case '\\':
                 i++;
-                if (charToCharSet(&charSet, pattern[i], 1, 1) < 0)
+                if (charToCharSet(&charSet, pattern[i], 1, 1, 1) < 0)
                 {
                     goto exception;
                 }
@@ -467,7 +486,7 @@ static int parseSquare(Fragment *out, const char *pattern, int *groups, int deep
                 }
                 break;
             default:
-                if (charToCharSet(&charSet, pattern[i], 1, 0) < 0)
+                if (charToCharSet(&charSet, pattern[i], 1, 0, 1) < 0)
                 {
                     goto exception;
                 }
@@ -489,7 +508,7 @@ static int parseSquare(Fragment *out, const char *pattern, int *groups, int deep
             {
             case '\\':
                 i++;
-                if (charToCharSet(&charSet, pattern[i], 0, 1) < 0)
+                if (charToCharSet(&charSet, pattern[i], 0, 1, 1) < 0)
                 {
                     goto exception;
                 }
@@ -511,7 +530,7 @@ static int parseSquare(Fragment *out, const char *pattern, int *groups, int deep
                 }
                 break;
             default:
-                if (charToCharSet(&charSet, pattern[i], 0, 0) < 0)
+                if (charToCharSet(&charSet, pattern[i], 0, 0, 1) < 0)
                 {
                     goto exception;
                 }
@@ -985,7 +1004,7 @@ static int parsePattern(Fragment *out, const char *pattern, int *paren, int *gro
         {
             CharSet charSet;
             initCharSet(&charSet, 1);
-            charToCharSet(&charSet, '\n', 1, 0);
+            charToCharSet(&charSet, '\n', 1, 0, 0);
             Fragment fragment1 = combineCharByCharSet(&charSet, groups, *paren, visited, visited1);
             if (fragment1.state != NULL)
             {
