@@ -38,16 +38,16 @@ cregex是一个用标准C写的小型正则表达式引擎，使用NFA（非确�
 #include "cregex.h"
 int main()
 {   
-    CRegex *regex = cRegexCompile("(a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?)aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    cregex_t *regex = cregex_compile("(a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?a?)aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     if (NULL == regex)
         return -1;
-    CRegexMatch matchs[2];
+    cregex_match_t matchs[2];
     clock_t begin = clock();
-    int result = cRegexMatch(regex, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", matchs, 2, 0);
+    int result = cregex_match(regex, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", matchs, 2, 0);
     clock_t end = clock();
     printf("result = %d\n", result);
     printf("us:%ld\n", end - begin);
-    cRegexFree(regex);
+    cregex_free(regex);
     return 0;
 }
 ```
