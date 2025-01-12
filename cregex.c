@@ -1512,6 +1512,7 @@ finally:
 
 cregex_t *cregex_compile(const char *pattern)
 {
+    fragment_t fragment = init_fragment(NULL, NULL);
     cregex_t *regex = malloc(sizeof(cregex_t));
     if (NULL == regex)
     {
@@ -1529,7 +1530,6 @@ cregex_t *cregex_compile(const char *pattern)
     {
         goto exception;
     }
-    fragment_t fragment = init_fragment(NULL, NULL);
     int paren = -1;
     for (size_t i = 0; i < MAX_GROUPS; i++)
     {
